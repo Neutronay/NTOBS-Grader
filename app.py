@@ -24,14 +24,11 @@ app.secret_key = os.environ.get("FLASK_SECRET_KEY", "classmark-secret-key-12345"
 api_key = os.environ.get("GEMINI_API_KEY")
 
 if os.environ.get("PYTHONANYWHERE_SITE"):
-    proxy_config = types.HttpOptions(proxy="http://proxy.server:3128")
-    client = genai.Client(
-        api_key=api_key,
-        http_options=proxy_config
-    )
-else:
-    # Local fallback for VS Code / Development
-    client = genai.Client(api_key=api_key)
+    # Set proxy via environment variables so httpx picks it up automatically
+    os.environ["HTTP_PROXY"] = "http://proxy.server:3128"
+    os.environ["HTTPS_PROXY"] = "http://proxy.server:3128"
+
+client = genai.Client(api_key=api_key)
 
 UPLOAD_FOLDER = 'uploads'
 OUTPUT_FOLDER = 'graded_outputs'
