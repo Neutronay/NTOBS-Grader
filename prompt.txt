@@ -1,0 +1,46 @@
+# Role & Goal
+Act as an expert Full-Stack Python Developer and AI Engineer. Build a student script grading and feedback web application called "ClassMark AI". The system uses Python (Flask), HTML/Tailwind CSS, and the Google GenAI SDK (Gemini 2.5 Flash/Pro) to upload questions, grade student scripts, annotate their PDFs, and export grades.
+
+Please build this application step-by-step according to the following architecture and feature requirements:
+
+---
+
+## Technical Stack & Libraries
+- **Backend:** Flask, OpenPyXL (for XLSX processing), pandas/csv (for student lists).
+- **AI Integration:** Google GenAI SDK (`google-genai`), utilizing `gemini-2.5-flash` (for fast OCR/grading) or `gemini-2.5-pro` (for complex rubrics/math) with Structured Outputs (JSON).
+- **PDF Annotation Engine:** `pypdf` or `pdfplumber` to extract/analyze coordinates, and `reportlab` or `PyMuPDF` (fitz) to overlay red circle scores, text annotations, and feedback on top of the original uploaded student script PDFs.
+
+---
+
+## Step-by-Step Feature Specifications
+
+### Step 1: Home Page (Teacher Setup & Context Upload)
+- **UI:** Clean, premium, minimalist tailwind layout.
+- **Fields:** 
+  * Subject (Text)
+  * Class/Section (Text)
+  * Number of Students (Integer)
+  * Total Obtainable Score (Integer)
+- **Uploaders:**
+  * Exam Question/Marking Guide/Rubric Upload (Accepts .pdf, .docx, or .txt).
+- **Action:** Submits form to store setup parameters in session or a lightweight SQLite database and redirects to the batch ingestion page.
+
+### Step 2: Batch Ingestion Page (Student Roster & Script Uploads)
+- **Two Upload Paths:**
+  1. **Manual Entry Table:** Form rows featuring an input box for `Student Name` side-by-side with an file upload box (`Student Script PDF`). Rows dynamically add/remove based on the "Number of Students" input or a "+" button.
+  2. **Bulk Ingest (.xlsx / .csv):** A file drag-and-drop zone. If uploaded, the backend parses the roster list, displays them as populated manual rows, and allows the teacher to attach the corresponding PDF files next to each parsed name.
+- **Action:** Submits the batch payload to the Flask background queue for processing.
+
+### Step 3: Core AI Grading & Document Annotation Logic (Backend)
+- **Gemini Prompts:** Implement structured system instructions where Gemini receives:
+  1. The marking guide/rubric.
+  2. The student script PDF (directly processed via Gemini File API).
+  3. The maximum obtainable score.
+- **Output Constraint:** Force Gemini to return a clean JSON payload matching a schema: 
+  ```json
+  {
+    "score": float,
+    "breakdown": [{"question_number": "string", "score_awarded": float, "feedback_comment": "string"}],
+    "overall_feedback": "string",
+    "annotations": [{"page": int, "y_percent": float, "x_percent": float, "comment": "string"}]
+  }

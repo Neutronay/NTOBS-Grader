@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>ClassMark AI - Batch Upload</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen">
+    <main class="max-w-4xl mx-auto my-12 p-8 bg-white rounded-2xl shadow-sm border border-slate-100">
+        <h1 class="text-2xl font-bold text-slate-900 mb-2">Upload & Student Scripts Allocation</h1>
+        <p class="text-slate-500 mb-6">Upload a class spreadsheet to bulk-populate student profiles, or configure scripts manually below.</p>
+
+        <!-- Bulk File Dropper Form Section -->
+        <form action="/batch-ingestion" method="POST" enctype="multipart/form-data" class="mb-8 p-4 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between gap-4">
+            <div class="flex-1">
+                <label class="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Bulk Students' Names Upload</label>
+                <input type="file" name="roster_file" accept=".csv,.xlsx" class="text-sm text-slate-600 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-slate-200 file:text-slate-700 hover:file:bg-slate-300">
+            </div>
+            <button type="submit" class="px-4 py-2 bg-slate-200 text-slate-700 font-medium rounded-lg hover:bg-slate-300 transition text-sm">
+                Upload Details
+            </button>
+        </form>
+
+        <!-- Master Core Pipeline Deployment Frame execution endpoint -->
+        <form action="/process-grading" method="POST" enctype="multipart/form-data">
+            <div class="border border-slate-100 rounded-xl overflow-hidden mb-6">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-slate-50 border-b border-slate-100 text-xs font-bold uppercase tracking-wider text-slate-500">
+                            <th class="p-4">Student Name</th>
+                            <th class="p-4">Upload Answer Script (PDF Only)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="student-rows" class="divide-y divide-slate-100 text-sm">
+                        {% if parsed_students %}
+                            {% for student in parsed_students %}
+                            <tr>
+                                <td class="p-4"><input type="text" name="student_names[]" value="{{ student }}" required class="w-full px-3 py-1.5 border border-slate-200 rounded-md bg-white"></td>
+                                <td class="p-4"><input type="file" name="student_scripts[]" accept=".pdf" required class="text-xs"></td>
+                            </tr>
+                            {% endfor %}
+                        {% else %}
+                            {% for i in range(num_students) %}
+                            <tr>
+                                <td class="p-4"><input type="text" name="student_names[]" placeholder="Student Name" required class="w-full px-3 py-1.5 border border-slate-200 rounded-md bg-white"></td>
+                                <td class="p-4"><input type="file" name="student_scripts[]" accept=".pdf" required class="text-xs"></td>
+                            </tr>
+                            {% endfor %}
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="flex justify-between items-center">
+                <button type="button" onclick="addNewRow()" class="px-4 py-2 border border-slate-200 rounded-lg text-sm font-medium hover:bg-slate-50 transition">
+                    + Add Student
+                </button>
+                <button type="submit" class="px-6 py-2.5 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition shadow-sm">
+                    Mark Scripts
+                </button>
+            </div>
+        </form>
+    </main>
+
+    <script>
+        function addNewRow() {
+            const tbody = document.getElementById('student-rows');
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td class="p-4"><input type="text" name="student_names[]" placeholder="Student Name" required class="w-full px-3 py-1.5 border border-slate-200 rounded-md bg-white"></td>
+                <td class="p-4"><input type="file" name="student_scripts[]" accept=".pdf" required class="text-xs"></td>
+            `;
+            tbody.appendChild(row);
+        }
+    </script>
+</body>
+</html>

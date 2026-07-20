@@ -1,0 +1,12 @@
+# Ignore API keys and secrets
+.env
+
+# Ignore uploaded and generated PDFs
+uploads/
+graded_outputs/
+
+# Ignore Python virtual environment & cache
+venv/
+.venv/
+__pycache__/
+*.pyc

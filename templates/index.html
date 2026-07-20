@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Script Marking AI</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col justify-between">
+    <main class="max-w-3xl mx-auto my-12 p-8 bg-white rounded-2xl shadow-sm border border-slate-100 w-full">
+        <h1 class="text-3xl font-bold text-slate-900 mb-2 tracking-tight">NTOBS Grader</h1>
+        <p class="text-slate-500 mb-8">Fill in the Class Details</p>
+        
+        <form action="/" method="POST" enctype="multipart/form-data" class="space-y-6">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-2">Subject / Module</label>
+                    <input type="text" name="subject" required placeholder="Enter Subject" class="w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50">
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-2">Class / Section</label>
+                    <input type="text" name="class_section" required placeholder="Enter Class" class="w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50">
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-2">Number of Students</label>
+                    <input type="number" name="num_students" min="1" value="400" required class="w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50">
+                </div>
+                <div>
+                    <label class="block text-sm font-semibold text-slate-700 mb-2">Total Obtainable Score</label>
+                    <input type="number" name="total_score" min="1" value="100" required class="w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50">
+                </div>
+            </div>
+
+            <div class="border-t border-slate-100 pt-6">
+                <label class="block text-sm font-semibold text-slate-700 mb-2">Question Paper / Marking Guide</label>
+                <div class="border-2 border-dashed border-slate-200 rounded-xl p-6 text-center hover:bg-slate-50 transition cursor-pointer relative">
+                    <input type="file" name="rubric_file" required accept=".pdf,.docx,.txt" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">
+                    <p class="text-sm text-slate-600 font-medium">Click to upload or drag & drop</p>
+                    <p class="text-xs text-slate-400 mt-1">Accepts PDF, DOCX, or TXT formats</p>
+                </div>
+            </div>
+
+            <button type="submit" class="w-full py-3 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800 transition shadow-sm">
+                Save Setup & Proceed
+            </button>
+        </form>
+    </main>
+</body>
+</html>

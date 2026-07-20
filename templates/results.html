@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>ClassMark AI - Results Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen">
+    <main class="max-w-5xl mx-auto my-12 p-8 bg-white rounded-2xl shadow-sm border border-slate-100">
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
+            <div>
+                <h1 class="text-2xl font-bold text-slate-900 tracking-tight">Evaluated Scripts & Performance Gradebook</h1>
+                <p class="text-slate-500 text-sm">Review, inspect, or pull data into spreadsheet formats.</p>
+            </div>
+            <a href="/export/xlsx" class="inline-flex items-center px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 transition shadow-sm">
+                Export Gradebook (.XLSX)
+            </a>
+        </div>
+
+        <div class="border border-slate-100 rounded-xl overflow-hidden">
+            <table class="w-full text-left border-collapse">
+                <thead>
+                    <tr class="bg-slate-50 border-b border-slate-100 text-xs font-bold uppercase tracking-wider text-slate-500">
+                        <th class="p-4">Student Name</th>
+                        <th class="p-4">Assigned Grade</th>
+                        <th class="p-4">AI Explanatory Feedback Summary</th>
+                        <th class="p-4 text-right">Annotated Document</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 text-sm">
+                    {% for row in results %}
+                    <tr class="hover:bg-slate-50/50 transition">
+                        <td class="p-4 font-semibold text-slate-900">{{ row.name }}</td>
+                        <td class="p-4">
+                            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-100">
+                                {{ row.score }}
+                            </span>
+                        </td>
+                        <td class="p-4 text-slate-600 max-w-sm truncate" title="{{ row.feedback }}">{{ row.feedback }}</td>
+                        <td class="p-4 text-right">
+                            <a href="{{ row.download_url }}" class="inline-flex items-center px-3 py-1.5 border border-slate-200 rounded-md text-xs font-medium text-slate-700 bg-white hover:bg-slate-50 transition shadow-xs">
+                                Download Marked PDF
+                            </a>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="4" class="p-8 text-center text-slate-400">No grading analysis runs present yet inside pipeline storage history.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="mt-8 border-t border-slate-100 pt-6">
+            <a href="/" class="text-sm font-medium text-slate-600 hover:text-slate-900 transition">← Run Another Session
+                
+            </a>
+        </div>
+    </main>
+</body>
+</html>
