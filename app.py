@@ -15,7 +15,7 @@ from reportlab.lib.pagesizes import letter
 
 # New Google GenAI SDK
 from google import genai
-from google.genai import types, client_options
+from google.genai import types
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "classmark-secret-key-12345")
@@ -24,7 +24,7 @@ app.secret_key = os.environ.get("FLASK_SECRET_KEY", "classmark-secret-key-12345"
 api_key = os.environ.get("GEMINI_API_KEY")
 
 if os.environ.get("PYTHONANYWHERE_SITE"):
-    proxy_config = client_options.HttpOptions(proxy="http://proxy.server:3128")
+    proxy_config = types.HttpOptions(proxy="http://proxy.server:3128")
     client = genai.Client(
         api_key=api_key,
         http_options=proxy_config
