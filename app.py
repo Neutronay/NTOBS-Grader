@@ -23,8 +23,8 @@ app.secret_key = os.environ.get("FLASK_SECRET_KEY", "classmark-secret-key-12345"
 # ---- Setup Gemini Client (Respecting PythonAnywhere's free proxy) ----
 api_key = os.environ.get("GEMINI_API_KEY")
 
+# Set proxy via environment variables if running on PythonAnywhere so httpx picks it up automatically
 if os.environ.get("PYTHONANYWHERE_SITE"):
-    # Set proxy via environment variables so httpx picks it up automatically
     os.environ["HTTP_PROXY"] = "http://proxy.server:3128"
     os.environ["HTTPS_PROXY"] = "http://proxy.server:3128"
 
