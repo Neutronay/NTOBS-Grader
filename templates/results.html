@@ -74,7 +74,11 @@
                                 <td class="p-4 max-w-xs sm:max-w-sm">
                                     <div class="flex items-center gap-2">
                                         <p class="text-xs text-slate-600 truncate flex-1" title="{{ row.feedback }}">{{ row.feedback }}</p>
-                                        <button type="button" onclick="openFeedbackModal('{{ row.name|escapejs }}', '{{ row.score|escapejs }}', '{{ row.feedback|escapejs }}')" 
+                                        <button type="button" 
+                                                data-name="{{ row.name }}"
+                                                data-score="{{ row.score }}"
+                                                data-feedback="{{ row.feedback }}"
+                                                onclick="openFeedbackModalFromElement(this)" 
                                                 class="text-indigo-600 hover:text-indigo-800 text-xs font-semibold hover:underline flex-shrink-0 cursor-pointer">
                                             View Full
                                         </button>
@@ -173,7 +177,11 @@
         }
 
         // Modal Handlers
-        function openFeedbackModal(name, score, feedback) {
+        function openFeedbackModalFromElement(el) {
+            const name = el.getAttribute('data-name');
+            const score = el.getAttribute('data-score');
+            const feedback = el.getAttribute('data-feedback');
+
             document.getElementById('modal-student-name').textContent = name;
             document.getElementById('modal-student-score').textContent = `Assigned Score: ${score}`;
             document.getElementById('modal-feedback-content').textContent = feedback;
