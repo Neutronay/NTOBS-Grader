@@ -4,6 +4,7 @@ import json
 import io
 import time
 import shutil
+import logging
 import pandas as pd
 from flask import Flask, render_template, request, redirect, url_for, session, send_from_directory, send_file
 from werkzeug.utils import secure_filename
@@ -14,9 +15,14 @@ from typing import List
 from pypdf import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
 
-# Google GenAI SDK
+# Google GenAI SDK & Core Exceptions
 from google import genai
 from google.genai import types
+from google.genai.errors import APIError
+
+# Setup Logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "classmark-secret-key-12345")
@@ -58,6 +64,58 @@ class GradingResult(BaseModel):
     annotations: List[Annotation]
 
 
+# ---- Helpers: Resilience, Backoff, & Payload Sanitization ----
+
+def sanitize_text(text: str) -> str:
+    """Removes null bytes and non-printable control characters that trigger model API crashes."""
+    if not text:
+        return ""
+    # Strip null characters and clean string
+    cleaned = text.replace('\x00', '')
+    return cleaned.strip()
+
+
+def call_gemini_with_retry(uploaded_media, prompt_content, retries=3):
+    """
+    Executes model generation with exponential backoff for transient 500/503 errors.
+    Waits 2s, 4s, 8s... between retries.
+    """
+    for attempt in range(retries):
+        try:
+            logger.info(f"Sending request to Gemini API (Attempt {attempt + 1}/{retries})...")
+            response = client.models.generate_content(
+                model='gemini-3.5-flash',
+                contents=[uploaded_media, prompt_content],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=GradingResult,
+                    temperature=0.1
+                )
+            )
+            return response
+
+        except APIError as e:
+            # Handle Server Errors (500 Internal, 503 Service Unavailable, 504 Timeout)
+            if e.code in [500, 503, 504] or "INTERNAL" in str(e).upper():
+                logger.warning(f"Transient Server Error ({e.code}) on attempt {attempt + 1}: {e.message}")
+                if attempt == retries - 1:
+                    logger.error("Max retries reached. Raising Exception.")
+                    raise e
+                sleep_time = 2 ** (attempt + 1)
+                logger.info(f"Retrying in {sleep_time} seconds...")
+                time.sleep(sleep_time)
+            else:
+                # Client errors (400, 404, etc.) should fail fast without retrying
+                logger.error(f"Non-retryable API Error ({e.code}): {e.message}")
+                raise e
+
+        except Exception as generic_err:
+            logger.error(f"Unexpected Exception during generation: {generic_err}", exc_info=True)
+            if attempt == retries - 1:
+                raise generic_err
+            time.sleep(2 ** (attempt + 1))
+
+
 # ---- Core Business Logic Routes ----
 
 @app.route('/', methods=['GET', 'POST'])
@@ -87,10 +145,10 @@ def index():
 
             if filename.lower().endswith('.txt'):
                 try:
-                    with open(rubric_path, 'r', encoding='utf-8') as f:
-                        session['rubric_text'] = f.read()
+                    with open(rubric_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        session['rubric_text'] = sanitize_text(f.read())
                 except Exception as e:
-                    print(f"Error reading text rubric file: {e}")
+                    logger.error(f"Error reading text rubric file: {e}")
                     session['rubric_text'] = f"Master marking guide document reference: {filename}"
             else:
                 session['rubric_text'] = f"Master marking guide document reference: {filename}"
@@ -124,7 +182,7 @@ def batch_ingestion():
                     parsed_students = df[name_col[0]].dropna().astype(str).tolist()
                     session['num_students'] = len(parsed_students)
             except Exception as e:
-                print(f"Error parsing roster file: {e}")
+                logger.error(f"Error parsing roster file: {e}")
             finally:
                 if os.path.exists(path):
                     os.remove(path)
@@ -138,7 +196,7 @@ def batch_ingestion():
 
 @app.route('/process-grading', methods=['POST'])
 def process_grading():
-    """Step 3 & 4: Core Engine Execution Route"""
+    """Step 3 & 4: Core Engine Execution Route with Full Fallbacks"""
     student_names = request.form.getlist('student_names[]')
     student_files = request.files.getlist('student_scripts[]')
 
@@ -163,13 +221,14 @@ def process_grading():
         grading_data = None
         uploaded_media = None
 
-        # 1. AI Grading Processing using google-genai SDK
+        # 1. AI Grading Processing using google-genai SDK + Retry Safeguards
         try:
             uploaded_media = client.files.upload(
                 file=script_path,
                 config=types.UploadFileConfig(mime_type="application/pdf")
             )
 
+            # Wait for file processing state
             while uploaded_media.state.name == "PROCESSING":
                 time.sleep(2)
                 uploaded_media = client.files.get(name=uploaded_media.name)
@@ -177,32 +236,25 @@ def process_grading():
             if uploaded_media.state.name == "FAILED":
                 raise ValueError("PDF File processing failed on Gemini server.")
 
+            # Construct & sanitize context prompt
             prompt_content = f"""
             You are a highly thorough academic grader. Assess the student script provided.
-            Reference Marking Rubric/Guide context: {rubric_text}
+            Reference Marking Rubric/Guide context: {sanitize_text(rubric_text)}
             Maximum possible total score: {total_score}
 
             Carefully cross-verify every written answer against the criteria. Assign individual question points and generate layout mapping annotations for exact visual points on pages.
             """
 
-            response = client.models.generate_content(
-                model='gemini-3.5-flash',
-                contents=[uploaded_media, prompt_content],
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=GradingResult,
-                    temperature=0.1
-                )
-            )
-
+            # Call API with exponential retry logic
+            response = call_gemini_with_retry(uploaded_media, prompt_content, retries=3)
             grading_data = json.loads(response.text)
 
         except Exception as e:
-            print(f"Gemini API Exception processing student {name}: {e}")
+            logger.error(f"Unrecoverable error while processing script for student '{name}': {e}", exc_info=True)
             grading_data = {
                 "score": 0.0,
                 "breakdown": [],
-                "overall_feedback": f"Failed to evaluate script via AI: {str(e)}",
+                "overall_feedback": f"Evaluation interrupted (Server Error 500/Timeout): {str(e)}",
                 "annotations": []
             }
 
@@ -211,7 +263,7 @@ def process_grading():
                 try:
                     client.files.delete(name=uploaded_media.name)
                 except Exception as del_err:
-                    print(f"Failed to delete uploaded media {uploaded_media.name}: {del_err}")
+                    logger.warning(f"Failed to delete uploaded media {uploaded_media.name}: {del_err}")
 
         # 2. Document Layout Overlay Engine
         graded_filename = f"Graded_{unique_prefix}_{filename}"
@@ -222,7 +274,7 @@ def process_grading():
             try:
                 os.remove(script_path)
             except Exception as e:
-                print(f"Error removing temporary upload file: {e}")
+                logger.warning(f"Error removing temporary upload file: {e}")
 
         results_summary.append({
             "name": name,
@@ -297,7 +349,7 @@ def annotate_student_pdf(input_pdf_path, output_pdf_path, grading_data):
             writer.write(f)
 
     except Exception as e:
-        print(f"Error annotating PDF document target structure: {e}")
+        logger.error(f"Error annotating PDF document target structure: {e}")
         if os.path.exists(input_pdf_path):
             shutil.copy(input_pdf_path, output_pdf_path)
 
