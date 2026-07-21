@@ -2,6 +2,8 @@
 import uuid
 import json
 import io
+import time
+import shutil
 import pandas as pd
 from flask import Flask, render_template, request, redirect, url_for, session, send_from_directory, send_file
 from werkzeug.utils import secure_filename
@@ -11,7 +13,6 @@ from typing import List
 # PDF processing libraries
 from pypdf import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import letter
 
 # New Google GenAI SDK
 from google import genai
@@ -20,20 +21,23 @@ from google.genai import types
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "classmark-secret-key-12345")
 
-# ---- Setup Gemini Client (Respecting PythonAnywhere's free proxy) ----
+# ---- Setup Directories ----
+UPLOAD_FOLDER = os.path.join(os.getcwd(), 'uploads')
+OUTPUT_FOLDER = os.path.join(os.getcwd(), 'graded_outputs')
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+os.makedirs(OUTPUT_FOLDER, exist_ok=True)
+
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['OUTPUT_FOLDER'] = OUTPUT_FOLDER
+
+# ---- Setup Gemini Client (Respecting Proxy Settings) ----
 api_key = os.environ.get("GEMINI_API_KEY")
 
 if os.environ.get("PYTHONANYWHERE_SITE"):
-    # Set proxy via environment variables so httpx picks it up automatically
     os.environ["HTTP_PROXY"] = "http://proxy.server:3128"
     os.environ["HTTPS_PROXY"] = "http://proxy.server:3128"
 
 client = genai.Client(api_key=api_key)
-
-UPLOAD_FOLDER = 'uploads'
-OUTPUT_FOLDER = 'graded_outputs'
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
 # ---- Pydantic Schemas for Structured Output ----
 class SubScore(BaseModel):
@@ -62,9 +66,17 @@ def index():
     if request.method == 'POST':
         session['subject'] = request.form.get('subject')
         session['class_section'] = request.form.get('class_section')
-        session['num_students'] = int(request.form.get('num_students', 1))
-        session['total_score'] = float(request.form.get('total_score', 100))
         
+        try:
+            session['num_students'] = int(request.form.get('num_students', 1))
+        except ValueError:
+            session['num_students'] = 1
+
+        try:
+            session['total_score'] = float(request.form.get('total_score', 100))
+        except ValueError:
+            session['total_score'] = 100.0
+
         # Handle Rubric/Marking Guide Upload
         rubric_file = request.files.get('rubric_file')
         if rubric_file and rubric_file.filename != '':
@@ -72,16 +84,20 @@ def index():
             rubric_path = os.path.join(UPLOAD_FOLDER, f"rubric_{uuid.uuid4().hex}_{filename}")
             rubric_file.save(rubric_path)
             session['rubric_path'] = rubric_path
-            
-            # Read textual content from rubric for immediate context injection if txt
-            if rubric_path.endswith('.txt'):
-                with open(rubric_path, 'r', encoding='utf-8') as f:
-                    session['rubric_text'] = f.read()
+
+            # Read textual content from rubric if plain text
+            if filename.lower().endswith('.txt'):
+                try:
+                    with open(rubric_path, 'r', encoding='utf-8') as f:
+                        session['rubric_text'] = f.read()
+                except Exception as e:
+                    print(f"Error reading text rubric file: {e}")
+                    session['rubric_text'] = f"Master marking guide document reference: {filename}"
             else:
-                session['rubric_text'] = f"See attached master marking guide document reference: {filename}"
-        
+                session['rubric_text'] = f"Master marking guide document reference: {filename}"
+
         return redirect(url_for('batch_ingestion'))
-        
+
     return render_template('index.html')
 
 
@@ -96,24 +112,31 @@ def batch_ingestion():
         roster_file = request.files['roster_file']
         if roster_file and roster_file.filename != '':
             filename = secure_filename(roster_file.filename)
-            path = os.path.join(UPLOAD_FOLDER, filename)
+            path = os.path.join(UPLOAD_FOLDER, f"roster_{uuid.uuid4().hex}_{filename}")
             roster_file.save(path)
-            
+
             try:
-                if filename.endswith('.csv'):
+                if filename.lower().endswith('.csv'):
                     df = pd.read_csv(path)
                 else:
                     df = pd.read_excel(path)
-                
+
                 # Sniff column name containing student data
-                name_col = [col for col in df.columns if 'name' in col.lower()]
+                name_col = [col for col in df.columns if 'name' in str(col).lower()]
                 if name_col:
-                    parsed_students = df[name_col[0]].dropna().tolist()
+                    parsed_students = df[name_col[0]].dropna().astype(str).tolist()
                     session['num_students'] = len(parsed_students)
             except Exception as e:
                 print(f"Error parsing roster file: {e}")
+            finally:
+                if os.path.exists(path):
+                    os.remove(path)
 
-    return render_template('batch.html', num_students=session.get('num_students', num_students), parsed_students=parsed_students)
+    return render_template(
+        'batch.html',
+        num_students=session.get('num_students', num_students),
+        parsed_students=parsed_students
+    )
 
 
 @app.route('/process-grading', methods=['POST'])
@@ -121,73 +144,101 @@ def process_grading():
     """Step 3 & 4: Core Engine Execution Route"""
     student_names = request.form.getlist('student_names[]')
     student_files = request.files.getlist('student_scripts[]')
-    
+
     rubric_text = session.get('rubric_text', 'Follow standard logical grading rules.')
     total_score = session.get('total_score', 100.0)
-    
+
     results_summary = []
-    
+
     for index, name in enumerate(student_names):
         if index >= len(student_files):
             break
-        
+
         file = student_files[index]
-        if file and file.filename != '':
-            filename = secure_filename(file.filename)
-            unique_prefix = uuid.uuid4().hex
-            script_path = os.path.join(UPLOAD_FOLDER, f"{unique_prefix}_{filename}")
-            file.save(script_path)
-            
-            # 1. AI Grading Processing using google-genai SDK
+        if not file or file.filename == '':
+            continue
+
+        filename = secure_filename(file.filename)
+        unique_prefix = uuid.uuid4().hex
+        script_path = os.path.join(UPLOAD_FOLDER, f"{unique_prefix}_{filename}")
+        file.save(script_path)
+
+        grading_data = None
+        uploaded_media = None
+
+        # 1. AI Grading Processing using google-genai SDK
+        try:
+            uploaded_media = client.files.upload(
+                file=script_path,
+                config=types.UploadFileConfig(mime_type="application/pdf")
+            )
+
+            # Wait for file processing if needed
+            while uploaded_media.state.name == "PROCESSING":
+                time.sleep(2)
+                uploaded_media = client.files.get(name=uploaded_media.name)
+
+            if uploaded_media.state.name == "FAILED":
+                raise ValueError("PDF File processing failed on Gemini server.")
+
+            prompt_content = f"""
+            You are a highly thorough academic grader. Assess the student script provided.
+            Reference Marking Rubric/Guide context: {rubric_text}
+            Maximum possible total score: {total_score}
+
+            Carefully cross-verify every written answer against the criteria. Assign individual question points and generate layout mapping annotations for exact visual points on pages.
+            """
+
+            response = client.models.generate_content(
+                model='gemini-3.5-flash',
+                contents=[uploaded_media, prompt_content],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=GradingResult,
+                    temperature=0.1
+                )
+            )
+
+            # Parse structured validation output back safely
+            grading_data = json.loads(response.text)
+
+        except Exception as e:
+            print(f"Gemini API Exception processing student {name}: {e}")
+            grading_data = {
+                "score": 0.0,
+                "breakdown": [],
+                "overall_feedback": f"Failed to evaluate script via AI: {str(e)}",
+                "annotations": []
+            }
+
+        finally:
+            # Clean up remote file from Gemini servers
+            if uploaded_media:
+                try:
+                    client.files.delete(name=uploaded_media.name)
+                except Exception as del_err:
+                    print(f"Failed to delete uploaded media {uploaded_media.name}: {del_err}")
+
+        # 2. Document Layout Overlay & Stamp Modification Engine
+        graded_filename = f"Graded_{unique_prefix}_{filename}"
+        graded_pdf_path = os.path.join(OUTPUT_FOLDER, graded_filename)
+        annotate_student_pdf(script_path, graded_pdf_path, grading_data)
+
+        # Remove local temporary input script
+        if os.path.exists(script_path):
             try:
-                uploaded_media = client.files.upload(
-                    file=script_path,
-                    config=types.UploadFileConfig(mime_type="application/pdf")
-                )
-                
-                prompt_content = f"""
-                You are a highly thorough academic grader. Assess the student script provided.
-                Reference Marking Rubric/Guide context: {rubric_text}
-                Maximum possible total score: {total_score}
-                
-                Carefully cross-verify every written answer against the criteria. Assign individual question points and generate layout mapping annotations for exact visual points on pages.
-                """
-                
-                response = client.models.generate_content(
-                    model='gemini-3.5-flash',
-                    contents=[uploaded_media, prompt_content],
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        response_schema=GradingResult,
-                        temperature=0.1
-                    )
-                )
-                
-                # Parse structured validation output back safely
-                grading_data = json.loads(response.text)
-                
+                os.remove(script_path)
             except Exception as e:
-                print(f"Gemini API Exception processing student {name}: {e}")
-                # Fallback structured record on failures
-                grading_data = {
-                    "score": 0.0,
-                    "breakdown": [],
-                    "overall_feedback": f"Failed to successfully evaluate script via AI: {str(e)}",
-                    "annotations": []
-                }
-            
-            # 2. Document Layout Overlay & Stamp Modification Engine
-            graded_pdf_path = os.path.join(OUTPUT_FOLDER, f"Graded_{unique_prefix}_{filename}")
-            annotate_student_pdf(script_path, graded_pdf_path, grading_data)
-            
-            results_summary.append({
-                "name": name,
-                "score": grading_data.get("score", 0),
-                "feedback": grading_data.get("overall_feedback", ""),
-                "download_url": f"/download/{os.path.basename(graded_pdf_path)}"
-            })
-            
-    # Cache raw results array dynamically inside system session for reporting
+                print(f"Error removing temporary upload file: {e}")
+
+        results_summary.append({
+            "name": name,
+            "score": grading_data.get("score", 0),
+            "feedback": grading_data.get("overall_feedback", ""),
+            "download_url": url_for('download_file', filename=graded_filename)
+        })
+
+    # Cache raw results array dynamically inside system session
     session['grading_results'] = results_summary
     return redirect(url_for('results_dashboard'))
 
@@ -197,66 +248,70 @@ def annotate_student_pdf(input_pdf_path, output_pdf_path, grading_data):
     try:
         reader = PdfReader(input_pdf_path)
         writer = PdfWriter()
-        
+
         annotations = grading_data.get('annotations', [])
-        
+
         for page_idx, page in enumerate(reader.pages):
-            # Read real native bounding dimensions box values from target page
             page_width = float(page.mediabox.width)
             page_height = float(page.mediabox.height)
-            
-            # Filters points mapping specifically to current context loop iteration
-            page_annotations = [a for a in annotations if int(a.get('page', 0)) == page_idx]
-            
+
+            # Safely filter annotations matching this page
+            page_annotations = []
+            for a in annotations:
+                p_num = a.get('page', 0) if isinstance(a, dict) else getattr(a, 'page', 0)
+                if int(p_num) == page_idx:
+                    page_annotations.append(a)
+
             packet = io.BytesIO()
             can = canvas.Canvas(packet, pagesize=(page_width, page_height))
-            
+
             # Render a visible red master stamp on top corner of Page 1
             if page_idx == 0:
-                can.setFillColorRGB(0.85, 0.1, 0.1)  # Premium Red
+                can.setFillColorRGB(0.85, 0.1, 0.1)  # Red
                 can.setStrokeColorRGB(0.85, 0.1, 0.1)
                 can.setLineWidth(3)
                 can.circle(page_width - 70, page_height - 70, 35, stroke=1, fill=0)
                 can.setFont("Helvetica-Bold", 16)
-                can.drawCentredString(page_width - 70, page_height - 76, f"{grading_data.get('score')}")
-            
-            # Render custom localized annotations returned from Gemini mapping coordinates
+                score_val = grading_data.get('score', 0)
+                can.drawCentredString(page_width - 70, page_height - 76, f"{score_val}")
+
+            # Render custom localized annotations
             for ann in page_annotations:
-                x_pct = ann.get('x_percent', 50) / 100.0
-                y_pct = ann.get('y_percent', 50) / 100.0
-                
-                # Transform standardized relative top-left layout into standard Cartesian PDF Space
+                x_val = ann.get('x_percent', 50) if isinstance(ann, dict) else getattr(ann, 'x_percent', 50)
+                y_val = ann.get('y_percent', 50) if isinstance(ann, dict) else getattr(ann, 'y_percent', 50)
+                comment_val = ann.get('comment', '') if isinstance(ann, dict) else getattr(ann, 'comment', '')
+
+                x_pct = float(x_val) / 100.0
+                y_pct = float(y_val) / 100.0
+
                 target_x = x_pct * page_width
                 target_y = page_height - (y_pct * page_height)
-                
+
                 can.setFillColorRGB(0.85, 0.1, 0.1)
                 can.setStrokeColorRGB(0.85, 0.1, 0.1)
                 can.setLineWidth(1.5)
-                
+
                 # Draw visual indicator anchor circle
                 can.circle(target_x, target_y, 8, stroke=1, fill=0)
                 # Draw feedback comment text block beside anchor coordinate safely
                 can.setFont("Helvetica-Bold", 9)
-                can.drawString(target_x + 12, target_y - 3, str(ann.get('comment', '')))
-                
+                can.drawString(target_x + 12, target_y - 3, str(comment_val))
+
             can.save()
             packet.seek(0)
-            
-            # Merge existing vector layer with custom annotations overlay Canvas map
+
             overlay_reader = PdfReader(packet)
             if len(overlay_reader.pages) > 0:
                 page.merge_page(overlay_reader.pages[0])
-                
+
             writer.add_page(page)
-            
+
         with open(output_pdf_path, 'wb') as f:
             writer.write(f)
-            
+
     except Exception as e:
         print(f"Error annotating PDF document target structure: {e}")
-        # Soft-fallback replication bypass line if exception breaks canvas writing block
         if os.path.exists(input_pdf_path):
-            import shutil
             shutil.copy(input_pdf_path, output_pdf_path)
 
 
@@ -267,10 +322,10 @@ def results_dashboard():
     return render_template('results.html', results=results)
 
 
-@app.route('/download/<filename>')
+@app.route('/download/<path:filename>')
 def download_file(filename):
     """File download handler for graded PDFs"""
-    return send_from_directory(OUTPUT_FOLDER, filename, as_attachment=True)
+    return send_from_directory(app.config['OUTPUT_FOLDER'], filename, as_attachment=True)
 
 
 @app.route('/export/xlsx')
@@ -279,14 +334,14 @@ def export_xlsx():
     results = session.get('grading_results', [])
     if not results:
         return "No data to export", 400
-        
+
     df = pd.DataFrame(results)[['name', 'score', 'feedback']]
     df.columns = ['Student Name', 'Score Awarded', 'Overall Feedback Evaluated']
-    
+
     out_io = io.BytesIO()
     with pd.ExcelWriter(out_io, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name='ClassMark Summary')
-        
+
     out_io.seek(0)
     return send_file(
         out_io,
@@ -295,7 +350,7 @@ def export_xlsx():
         download_name="ClassMark_AI_Gradebook.xlsx"
     )
 
+
 if __name__ == '__main__':
-    # Render dynamically sets a PORT environment variable. Fallback to 5000 if local.
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
