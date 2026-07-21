@@ -186,7 +186,7 @@ def process_grading():
             """
 
             response = client.models.generate_content(
-                model='gemini-2.5-flash',
+                model='gemini-3.5-flash',
                 contents=[uploaded_media, prompt_content],
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
