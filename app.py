@@ -14,7 +14,7 @@ from typing import List
 from pypdf import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
 
-# New Google GenAI SDK
+# Google GenAI SDK
 from google import genai
 from google.genai import types
 
@@ -30,7 +30,7 @@ os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['OUTPUT_FOLDER'] = OUTPUT_FOLDER
 
-# ---- Setup Gemini Client (Respecting Proxy Settings) ----
+# ---- Setup Gemini Client ----
 api_key = os.environ.get("GEMINI_API_KEY")
 
 if os.environ.get("PYTHONANYWHERE_SITE"):
@@ -85,7 +85,6 @@ def index():
             rubric_file.save(rubric_path)
             session['rubric_path'] = rubric_path
 
-            # Read textual content from rubric if plain text
             if filename.lower().endswith('.txt'):
                 try:
                     with open(rubric_path, 'r', encoding='utf-8') as f:
@@ -107,7 +106,6 @@ def batch_ingestion():
     num_students = session.get('num_students', 1)
     parsed_students = []
 
-    # Handle Bulk Roster CSV/XLSX Uploads
     if request.method == 'POST' and 'roster_file' in request.files:
         roster_file = request.files['roster_file']
         if roster_file and roster_file.filename != '':
@@ -121,7 +119,6 @@ def batch_ingestion():
                 else:
                     df = pd.read_excel(path)
 
-                # Sniff column name containing student data
                 name_col = [col for col in df.columns if 'name' in str(col).lower()]
                 if name_col:
                     parsed_students = df[name_col[0]].dropna().astype(str).tolist()
@@ -173,7 +170,6 @@ def process_grading():
                 config=types.UploadFileConfig(mime_type="application/pdf")
             )
 
-            # Wait for file processing if needed
             while uploaded_media.state.name == "PROCESSING":
                 time.sleep(2)
                 uploaded_media = client.files.get(name=uploaded_media.name)
@@ -190,7 +186,7 @@ def process_grading():
             """
 
             response = client.models.generate_content(
-                model='gemini-3.5-flash',
+                model='gemini-2.5-flash',
                 contents=[uploaded_media, prompt_content],
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
@@ -199,7 +195,6 @@ def process_grading():
                 )
             )
 
-            # Parse structured validation output back safely
             grading_data = json.loads(response.text)
 
         except Exception as e:
@@ -212,19 +207,17 @@ def process_grading():
             }
 
         finally:
-            # Clean up remote file from Gemini servers
             if uploaded_media:
                 try:
                     client.files.delete(name=uploaded_media.name)
                 except Exception as del_err:
                     print(f"Failed to delete uploaded media {uploaded_media.name}: {del_err}")
 
-        # 2. Document Layout Overlay & Stamp Modification Engine
+        # 2. Document Layout Overlay Engine
         graded_filename = f"Graded_{unique_prefix}_{filename}"
         graded_pdf_path = os.path.join(OUTPUT_FOLDER, graded_filename)
         annotate_student_pdf(script_path, graded_pdf_path, grading_data)
 
-        # Remove local temporary input script
         if os.path.exists(script_path):
             try:
                 os.remove(script_path)
@@ -238,7 +231,6 @@ def process_grading():
             "download_url": url_for('download_file', filename=graded_filename)
         })
 
-    # Cache raw results array dynamically inside system session
     session['grading_results'] = results_summary
     return redirect(url_for('results_dashboard'))
 
@@ -255,7 +247,6 @@ def annotate_student_pdf(input_pdf_path, output_pdf_path, grading_data):
             page_width = float(page.mediabox.width)
             page_height = float(page.mediabox.height)
 
-            # Safely filter annotations matching this page
             page_annotations = []
             for a in annotations:
                 p_num = a.get('page', 0) if isinstance(a, dict) else getattr(a, 'page', 0)
@@ -265,9 +256,8 @@ def annotate_student_pdf(input_pdf_path, output_pdf_path, grading_data):
             packet = io.BytesIO()
             can = canvas.Canvas(packet, pagesize=(page_width, page_height))
 
-            # Render a visible red master stamp on top corner of Page 1
             if page_idx == 0:
-                can.setFillColorRGB(0.85, 0.1, 0.1)  # Red
+                can.setFillColorRGB(0.85, 0.1, 0.1)
                 can.setStrokeColorRGB(0.85, 0.1, 0.1)
                 can.setLineWidth(3)
                 can.circle(page_width - 70, page_height - 70, 35, stroke=1, fill=0)
@@ -275,7 +265,6 @@ def annotate_student_pdf(input_pdf_path, output_pdf_path, grading_data):
                 score_val = grading_data.get('score', 0)
                 can.drawCentredString(page_width - 70, page_height - 76, f"{score_val}")
 
-            # Render custom localized annotations
             for ann in page_annotations:
                 x_val = ann.get('x_percent', 50) if isinstance(ann, dict) else getattr(ann, 'x_percent', 50)
                 y_val = ann.get('y_percent', 50) if isinstance(ann, dict) else getattr(ann, 'y_percent', 50)
@@ -291,9 +280,7 @@ def annotate_student_pdf(input_pdf_path, output_pdf_path, grading_data):
                 can.setStrokeColorRGB(0.85, 0.1, 0.1)
                 can.setLineWidth(1.5)
 
-                # Draw visual indicator anchor circle
                 can.circle(target_x, target_y, 8, stroke=1, fill=0)
-                # Draw feedback comment text block beside anchor coordinate safely
                 can.setFont("Helvetica-Bold", 9)
                 can.drawString(target_x + 12, target_y - 3, str(comment_val))
 
