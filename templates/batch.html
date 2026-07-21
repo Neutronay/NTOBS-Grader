@@ -2,75 +2,324 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ClassMark AI - Batch Upload</title>
+    <!-- Tailwind CSS v4 CDN -->
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @keyframes pulse-subtle {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.85; transform: scale(0.98); }
+        }
+        .animate-pulse-subtle {
+            animation: pulse-subtle 3s infinite ease-in-out;
+        }
+    </style>
 </head>
-<body class="bg-slate-50 text-slate-800 min-h-screen">
-    <main class="max-w-4xl mx-auto my-12 p-8 bg-white rounded-2xl shadow-sm border border-slate-100">
-        <h1 class="text-2xl font-bold text-slate-900 mb-2">Upload & Student Scripts Allocation</h1>
-        <p class="text-slate-500 mb-6">Upload a class spreadsheet to bulk-populate student profiles, or configure scripts manually below.</p>
+<body class="bg-slate-900 text-slate-800 min-h-screen flex flex-col justify-center items-center p-4 sm:p-6 md:p-8 font-sans antialiased">
 
-        <!-- Bulk File Dropper Form Section -->
-        <form action="/batch-ingestion" method="POST" enctype="multipart/form-data" class="mb-8 p-4 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between gap-4">
-            <div class="flex-1">
-                <label class="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Bulk Students' Names Upload</label>
-                <input type="file" name="roster_file" accept=".csv,.xlsx" class="text-sm text-slate-600 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-slate-200 file:text-slate-700 hover:file:bg-slate-300">
-            </div>
-            <button type="submit" class="px-4 py-2 bg-slate-200 text-slate-700 font-medium rounded-lg hover:bg-slate-300 transition text-sm">
-                Upload Details
-            </button>
-        </form>
+    <!-- Header / Branding -->
+    <div class="max-w-4xl w-full text-center mb-6">
+        <div class="inline-flex items-center gap-2 bg-indigo-500/10 border border-indigo-500/20 px-3.5 py-1.5 rounded-full text-indigo-300 text-xs font-semibold uppercase tracking-wider mb-3">
+            <i data-lucide="layers" class="w-4 h-4 text-indigo-400"></i> Batch Ingestion Phase
+        </div>
+        <h1 class="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">Upload Student Scripts</h1>
+        <p class="text-slate-400 mt-2 text-sm sm:text-base">Populate student names via class roster or manually allocate answer scripts below.</p>
+    </div>
 
-        <!-- Master Core Pipeline Deployment Frame execution endpoint -->
-        <form action="/process-grading" method="POST" enctype="multipart/form-data">
-            <div class="border border-slate-100 rounded-xl overflow-hidden mb-6">
-                <table class="w-full text-left border-collapse">
-                    <thead>
-                        <tr class="bg-slate-50 border-b border-slate-100 text-xs font-bold uppercase tracking-wider text-slate-500">
-                            <th class="p-4">Student Name</th>
-                            <th class="p-4">Upload Answer Script (PDF Only)</th>
-                        </tr>
-                    </thead>
-                    <tbody id="student-rows" class="divide-y divide-slate-100 text-sm">
-                        {% if parsed_students %}
-                            {% for student in parsed_students %}
-                            <tr>
-                                <td class="p-4"><input type="text" name="student_names[]" value="{{ student }}" required class="w-full px-3 py-1.5 border border-slate-200 rounded-md bg-white"></td>
-                                <td class="p-4"><input type="file" name="student_scripts[]" accept=".pdf" required class="text-xs"></td>
-                            </tr>
-                            {% endfor %}
-                        {% else %}
-                            {% for i in range(num_students) %}
-                            <tr>
-                                <td class="p-4"><input type="text" name="student_names[]" placeholder="Student Name" required class="w-full px-3 py-1.5 border border-slate-200 rounded-md bg-white"></td>
-                                <td class="p-4"><input type="file" name="student_scripts[]" accept=".pdf" required class="text-xs"></td>
-                            </tr>
-                            {% endfor %}
-                        {% endif %}
-                    </tbody>
-                </table>
+    <!-- Main Card Container -->
+    <main class="max-w-4xl w-full bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden">
+        <div class="p-6 sm:p-8">
+
+            <!-- Bulk File Dropper Section -->
+            <div class="mb-8 p-5 bg-indigo-50/40 border border-indigo-100 rounded-2xl">
+                <div class="flex items-center gap-2.5 mb-3">
+                    <div class="w-7 h-7 bg-indigo-600 text-white rounded-lg flex items-center justify-center">
+                        <i data-lucide="file-spreadsheet" class="w-4 h-4"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-sm font-bold text-slate-900">Option A: Bulk Upload Class Roster</h3>
+                        <p class="text-xs text-slate-500">Auto-fill student names using a CSV or Excel spreadsheet.</p>
+                    </div>
+                </div>
+
+                <form action="/batch-ingestion" method="POST" enctype="multipart/form-data" class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-3 rounded-xl border border-slate-200">
+                    <div class="flex-1 relative flex items-center">
+                        <input type="file" id="roster_file" name="roster_file" accept=".csv,.xlsx" onchange="handleRosterChange(this)" class="hidden">
+                        <label for="roster_file" class="flex items-center gap-2 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg cursor-pointer transition">
+                            <i data-lucide="upload" class="w-3.5 h-3.5"></i>
+                            <span id="roster-btn-text">Choose CSV/XLSX</span>
+                        </label>
+                        <span id="roster-file-name" class="text-xs text-slate-400 ml-3 truncate max-w-[200px]">No file selected</span>
+                    </div>
+                    <button type="submit" class="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-medium rounded-lg transition text-xs flex items-center justify-center gap-1.5 cursor-pointer">
+                        <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+                        <span>Parse Roster</span>
+                    </button>
+                </form>
             </div>
 
-            <div class="flex justify-between items-center">
-                <button type="button" onclick="addNewRow()" class="px-4 py-2 border border-slate-200 rounded-lg text-sm font-medium hover:bg-slate-50 transition">
-                    + Add Student
-                </button>
-                <button type="submit" class="px-6 py-2.5 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition shadow-sm">
-                    Mark Scripts
-                </button>
-            </div>
-        </form>
+            <!-- Master Pipeline Table Form -->
+            <form id="grading-form" action="/process-grading" method="POST" enctype="multipart/form-data" onsubmit="showLoadingState(event)">
+                
+                <div class="flex items-center justify-between mb-4">
+                    <div class="flex items-center gap-2">
+                        <i data-lucide="users" class="w-5 h-5 text-indigo-600"></i>
+                        <h2 class="text-lg font-bold text-slate-900">Option B: Allocate Scripts Manually</h2>
+                    </div>
+                    <span class="text-xs text-slate-400 font-medium">Supported Format: PDF only</span>
+                </div>
+
+                <!-- Styled Table -->
+                <div class="border border-slate-200 rounded-xl overflow-hidden mb-6 shadow-xs">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="bg-slate-50 border-b border-slate-200 text-xs font-bold uppercase tracking-wider text-slate-600">
+                                    <th class="p-4 w-12 text-center">#</th>
+                                    <th class="p-4">Student Name</th>
+                                    <th class="p-4">Answer Script (PDF)</th>
+                                    <th class="p-4 w-12 text-center">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="student-rows" class="divide-y divide-slate-100 text-sm">
+                                {% if parsed_students %}
+                                    {% for student in parsed_students %}
+                                    <tr class="hover:bg-slate-50/50 transition">
+                                        <td class="p-4 text-center font-medium text-slate-400 row-number">{{ loop.index }}</td>
+                                        <td class="p-4">
+                                            <input type="text" name="student_names[]" value="{{ student }}" required placeholder="e.g. John Doe" class="w-full px-3.5 py-2 border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm transition font-medium">
+                                        </td>
+                                        <td class="p-4">
+                                            <div class="relative flex items-center">
+                                                <input type="file" name="student_scripts[]" accept=".pdf" required onchange="handleScriptChange(this)" class="hidden" id="script-file-{{ loop.index }}">
+                                                <label for="script-file-{{ loop.index }}" class="file-label inline-flex items-center gap-2 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg cursor-pointer transition border border-slate-200">
+                                                    <i data-lucide="file-up" class="w-4 h-4 text-slate-500"></i>
+                                                    <span class="file-text">Attach PDF Script</span>
+                                                </label>
+                                            </div>
+                                        </td>
+                                        <td class="p-4 text-center">
+                                            <button type="button" onclick="removeRow(this)" class="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition" title="Remove student">
+                                                <i data-lucide="trash-2" class="w-4 h-4"></i>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                {% else %}
+                                    {% for i in range(num_students) %}
+                                    <tr class="hover:bg-slate-50/50 transition">
+                                        <td class="p-4 text-center font-medium text-slate-400 row-number">{{ i + 1 }}</td>
+                                        <td class="p-4">
+                                            <input type="text" name="student_names[]" placeholder="Enter full name" required class="w-full px-3.5 py-2 border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm transition font-medium">
+                                        </td>
+                                        <td class="p-4">
+                                            <div class="relative flex items-center">
+                                                <input type="file" name="student_scripts[]" accept=".pdf" required onchange="handleScriptChange(this)" class="hidden" id="script-file-{{ i + 1 }}">
+                                                <label for="script-file-{{ i + 1 }}" class="file-label inline-flex items-center gap-2 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg cursor-pointer transition border border-slate-200">
+                                                    <i data-lucide="file-up" class="w-4 h-4 text-slate-500"></i>
+                                                    <span class="file-text">Attach PDF Script</span>
+                                                </label>
+                                            </div>
+                                        </td>
+                                        <td class="p-4 text-center">
+                                            <button type="button" onclick="removeRow(this)" class="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition" title="Remove student">
+                                                <i data-lucide="trash-2" class="w-4 h-4"></i>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                {% endif %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Form Controls -->
+                <div class="flex flex-col sm:flex-row justify-between items-center gap-4 pt-2">
+                    <button type="button" onclick="addNewRow()" class="w-full sm:w-auto px-4 py-2.5 border border-slate-200 hover:border-slate-300 rounded-xl text-xs font-bold uppercase tracking-wider text-slate-700 hover:bg-slate-50 transition flex items-center justify-center gap-2 cursor-pointer">
+                        <i data-lucide="user-plus" class="w-4 h-4 text-indigo-600"></i>
+                        <span>Add Student Row</span>
+                    </button>
+                    
+                    <button type="submit" id="submit-btn" class="w-full sm:w-auto px-8 py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-semibold shadow-lg shadow-indigo-600/20 hover:shadow-indigo-600/30 transition flex items-center justify-center gap-2 text-sm cursor-pointer">
+                        <span>Execute AI Grading Pipeline</span>
+                        <i data-lucide="sparkles" class="w-4 h-4"></i>
+                    </button>
+                </div>
+            </form>
+
+        </div>
     </main>
 
+    <!-- Full-Screen Interactive AI Processing Overlay -->
+    <div id="loading-overlay" class="fixed inset-0 bg-slate-950/80 backdrop-blur-md hidden flex-col items-center justify-center z-50 p-6 text-center">
+        <div class="max-w-md w-full bg-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl animate-pulse-subtle">
+            
+            <!-- Spinning Orb Graphic -->
+            <div class="relative w-20 h-20 mx-auto mb-6 flex items-center justify-center">
+                <div class="absolute inset-0 rounded-full border-4 border-indigo-500/20 border-t-indigo-500 animate-spin"></div>
+                <div class="w-12 h-12 bg-indigo-600/20 rounded-full flex items-center justify-center text-indigo-400">
+                    <i data-lucide="brain" class="w-6 h-6 animate-bounce"></i>
+                </div>
+            </div>
+
+            <h3 class="text-xl font-bold text-white tracking-tight mb-1">Evaluating Scripts</h3>
+            <p id="loading-status-text" class="text-xs text-indigo-300 font-medium mb-6">Analyzing student responses against marking rubrics...</p>
+
+            <!-- Progress Bar Frame -->
+            <div class="w-full bg-slate-800 h-2 rounded-full overflow-hidden mb-6">
+                <div id="loading-progress-bar" class="bg-gradient-to-r from-indigo-500 to-emerald-400 h-full w-1/4 transition-all duration-700 ease-out"></div>
+            </div>
+
+            <!-- Pipeline Step Breakdown -->
+            <div class="space-y-2.5 text-left text-xs">
+                <div class="flex items-center gap-2.5 text-slate-300">
+                    <i data-lucide="check-circle-2" class="w-4 h-4 text-emerald-400"></i>
+                    <span>PDF OCR Text Extraction</span>
+                </div>
+                <div class="flex items-center gap-2.5 text-slate-300">
+                    <i data-lucide="loader" class="w-4 h-4 text-indigo-400 animate-spin"></i>
+                    <span>Comparing against Marking Scheme</span>
+                </div>
+                <div class="flex items-center gap-2.5 text-slate-500">
+                    <i data-lucide="circle" class="w-4 h-4"></i>
+                    <span>Generating Feedback & Gradebook</span>
+                </div>
+            </div>
+            
+        </div>
+    </div>
+
+    <footer class="text-center mt-6 text-xs text-slate-500">
+        &copy; NTOBS Assessment System. Designed for Educator Efficiency.
+    </footer>
+
+    <!-- Interactive Scripts -->
     <script>
+        // Render Icons
+        lucide.createIcons();
+
+        // Handle Roster File Selection
+        function handleRosterChange(input) {
+            const fileNameElem = document.getElementById('roster-file-name');
+            const btnText = document.getElementById('roster-btn-text');
+            if (input.files && input.files[0]) {
+                fileNameElem.textContent = input.files[0].name;
+                fileNameElem.classList.remove('text-slate-400');
+                fileNameElem.classList.add('text-indigo-600', 'font-semibold');
+                btnText.textContent = "Change File";
+            }
+        }
+
+        // Handle Individual PDF Script Upload Feedback
+        function handleScriptChange(input) {
+            const label = input.nextElementSibling;
+            const textSpan = label.querySelector('.file-text');
+            const icon = label.querySelector('i');
+
+            if (input.files && input.files[0]) {
+                const fileName = input.files[0].name;
+                const displayName = fileName.length > 20 ? fileName.substring(0, 17) + '...' : fileName;
+                
+                textSpan.textContent = displayName;
+                
+                // Change style to Green/Uploaded state
+                label.classList.remove('bg-slate-100', 'text-slate-700', 'border-slate-200');
+                label.classList.add('bg-emerald-50', 'text-emerald-800', 'border-emerald-300');
+                
+                if (icon) {
+                    icon.setAttribute('data-lucide', 'file-check-2');
+                    icon.classList.remove('text-slate-500');
+                    icon.classList.add('text-emerald-600');
+                    lucide.createIcons();
+                }
+            }
+        }
+
+        // Dynamically add student row
         function addNewRow() {
             const tbody = document.getElementById('student-rows');
+            const rowCount = tbody.children.length + 1;
+            const uniqueId = 'script-file-new-' + Date.now();
+
             const row = document.createElement('tr');
+            row.className = "hover:bg-slate-50/50 transition";
             row.innerHTML = `
-                <td class="p-4"><input type="text" name="student_names[]" placeholder="Student Name" required class="w-full px-3 py-1.5 border border-slate-200 rounded-md bg-white"></td>
-                <td class="p-4"><input type="file" name="student_scripts[]" accept=".pdf" required class="text-xs"></td>
+                <td class="p-4 text-center font-medium text-slate-400 row-number">${rowCount}</td>
+                <td class="p-4">
+                    <input type="text" name="student_names[]" placeholder="Enter full name" required class="w-full px-3.5 py-2 border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm transition font-medium">
+                </td>
+                <td class="p-4">
+                    <div class="relative flex items-center">
+                        <input type="file" name="student_scripts[]" accept=".pdf" required onchange="handleScriptChange(this)" class="hidden" id="${uniqueId}">
+                        <label for="${uniqueId}" class="file-label inline-flex items-center gap-2 px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg cursor-pointer transition border border-slate-200">
+                            <i data-lucide="file-up" class="w-4 h-4 text-slate-500"></i>
+                            <span class="file-text">Attach PDF Script</span>
+                        </label>
+                    </div>
+                </td>
+                <td class="p-4 text-center">
+                    <button type="button" onclick="removeRow(this)" class="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition" title="Remove student">
+                        <i data-lucide="trash-2" class="w-4 h-4"></i>
+                    </button>
+                </td>
             `;
             tbody.appendChild(row);
+            lucide.createIcons();
+            updateRowNumbers();
+        }
+
+        // Remove row and recalculate index numbers
+        function removeRow(btn) {
+            const tbody = document.getElementById('student-rows');
+            if (tbody.children.length > 1) {
+                btn.closest('tr').remove();
+                updateRowNumbers();
+            }
+        }
+
+        // Keep row index numbers consistent
+        function updateRowNumbers() {
+            const rows = document.querySelectorAll('#student-rows tr');
+            rows.forEach((row, index) => {
+                const numTd = row.querySelector('.row-number');
+                if (numTd) numTd.textContent = index + 1;
+            });
+        }
+
+        // Trigger full screen loading overlay on form submit
+        function showLoadingState(event) {
+            const overlay = document.getElementById('loading-overlay');
+            const progressBar = document.getElementById('loading-progress-bar');
+            const statusText = document.getElementById('loading-status-text');
+
+            overlay.classList.remove('hidden');
+            overlay.classList.add('flex');
+
+            // Dynamic progress updates while server processes backend
+            const messages = [
+                "Extracting handwriting & text from PDF scripts...",
+                "Cross-checking responses with rubric guide...",
+                "Calculating obtainable score metrics...",
+                "Compiling explanatory feedback & gradebook..."
+            ];
+
+            let progress = 25;
+            let index = 0;
+
+            const interval = setInterval(() => {
+                if (progress < 90) {
+                    progress += 20;
+                    progressBar.style.width = `${progress}%`;
+                    if (index < messages.length - 1) {
+                        index++;
+                        statusText.textContent = messages[index];
+                    }
+                }
+            }, 1800);
         }
     </script>
 </body>
