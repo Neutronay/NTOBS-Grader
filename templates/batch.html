@@ -45,7 +45,7 @@
                     </div>
                 </div>
 
-                <form action="/batch-ingestion" method="POST" enctype="multipart/form-data" class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-3 rounded-xl border border-slate-200">
+                <form action="{{ url_for('batch_ingestion') }}" method="POST" enctype="multipart/form-data" class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white p-3 rounded-xl border border-slate-200">
                     <div class="flex-1 relative flex items-center">
                         <input type="file" id="roster_file" name="roster_file" accept=".csv,.xlsx" onchange="handleRosterChange(this)" class="hidden">
                         <label for="roster_file" class="flex items-center gap-2 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg cursor-pointer transition">
@@ -62,7 +62,7 @@
             </div>
 
             <!-- Master Pipeline Table Form -->
-            <form id="grading-form" action="/process-grading" method="POST" enctype="multipart/form-data" onsubmit="showLoadingState(event)">
+            <form id="grading-form" action="{{ url_for('process_grading') }}" method="POST" enctype="multipart/form-data" onsubmit="return showLoadingState(event)">
                 
                 <div class="flex items-center justify-between mb-4">
                     <div class="flex items-center gap-2">
@@ -199,6 +199,8 @@
 
     <!-- Interactive Scripts -->
     <script>
+        let rowCounter = 100;
+
         // Render Icons
         lucide.createIcons();
 
@@ -241,9 +243,10 @@
 
         // Dynamically add student row
         function addNewRow() {
+            rowCounter++;
             const tbody = document.getElementById('student-rows');
             const rowCount = tbody.children.length + 1;
-            const uniqueId = 'script-file-new-' + Date.now();
+            const uniqueId = 'script-file-new-' + Date.now() + '-' + rowCounter;
 
             const row = document.createElement('tr');
             row.className = "hover:bg-slate-50/50 transition";
@@ -290,8 +293,30 @@
             });
         }
 
-        // Trigger full screen loading overlay on form submit
+        // Trigger full screen loading overlay on form submit with client validation
         function showLoadingState(event) {
+            const scriptInputs = document.querySelectorAll('input[name="student_scripts[]"]');
+            const nameInputs = document.querySelectorAll('input[name="student_names[]"]');
+            
+            let isValid = true;
+
+            nameInputs.forEach(input => {
+                if (!input.value.trim()) {
+                    isValid = false;
+                }
+            });
+
+            scriptInputs.forEach(input => {
+                if (!input.files || input.files.length === 0) {
+                    isValid = false;
+                }
+            });
+
+            if (!isValid) {
+                alert("Please ensure all student names are entered and each row has an attached PDF script.");
+                return false;
+            }
+
             const overlay = document.getElementById('loading-overlay');
             const progressBar = document.getElementById('loading-progress-bar');
             const statusText = document.getElementById('loading-status-text');
@@ -299,7 +324,6 @@
             overlay.classList.remove('hidden');
             overlay.classList.add('flex');
 
-            // Dynamic progress updates while server processes backend
             const messages = [
                 "Extracting handwriting & text from PDF scripts...",
                 "Cross-checking responses with rubric guide...",
@@ -319,7 +343,9 @@
                         statusText.textContent = messages[index];
                     }
                 }
-            }, 1800);
+            }, 2500);
+
+            return true;
         }
     </script>
 </body>
