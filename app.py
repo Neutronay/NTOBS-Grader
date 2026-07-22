@@ -14,6 +14,7 @@ from typing import List
 # PDF processing libraries
 from pypdf import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
+from reportlab.lib.colors import HexColor
 
 # Google GenAI SDK & Core Exceptions
 from google import genai
@@ -70,7 +71,6 @@ def sanitize_text(text: str) -> str:
     """Removes null bytes and non-printable control characters that trigger model API crashes."""
     if not text:
         return ""
-    # Strip null characters and clean string
     cleaned = text.replace('\x00', '')
     return cleaned.strip()
 
@@ -95,9 +95,8 @@ def call_gemini_with_retry(uploaded_media, prompt_content, retries=3):
             return response
 
         except APIError as e:
-            # Handle Server Errors (500 Internal, 503 Service Unavailable, 504 Timeout)
-            if e.code in [500, 503, 504] or "INTERNAL" in str(e).upper():
-                logger.warning(f"Transient Server Error ({e.code}) on attempt {attempt + 1}: {e.message}")
+            if e.code in [429, 500, 503, 504] or "INTERNAL" in str(e).upper():
+                logger.warning(f"Transient Server or Rate Limit Error ({e.code}) on attempt {attempt + 1}: {e.message}")
                 if attempt == retries - 1:
                     logger.error("Max retries reached. Raising Exception.")
                     raise e
@@ -105,7 +104,6 @@ def call_gemini_with_retry(uploaded_media, prompt_content, retries=3):
                 logger.info(f"Retrying in {sleep_time} seconds...")
                 time.sleep(sleep_time)
             else:
-                # Client errors (400, 404, etc.) should fail fast without retrying
                 logger.error(f"Non-retryable API Error ({e.code}): {e.message}")
                 raise e
 
@@ -135,7 +133,6 @@ def index():
         except ValueError:
             session['total_score'] = 100.0
 
-        # Handle Rubric/Marking Guide Upload
         rubric_file = request.files.get('rubric_file')
         if rubric_file and rubric_file.filename != '':
             filename = secure_filename(rubric_file.filename)
@@ -196,7 +193,7 @@ def batch_ingestion():
 
 @app.route('/process-grading', methods=['POST'])
 def process_grading():
-    """Step 3 & 4: Core Engine Execution Route with Full Fallbacks"""
+    """Step 3 & 4: Core Engine Execution Route"""
     student_names = request.form.getlist('student_names[]')
     student_files = request.files.getlist('student_scripts[]')
 
@@ -221,14 +218,12 @@ def process_grading():
         grading_data = None
         uploaded_media = None
 
-        # 1. AI Grading Processing using google-genai SDK + Retry Safeguards
         try:
             uploaded_media = client.files.upload(
                 file=script_path,
                 config=types.UploadFileConfig(mime_type="application/pdf")
             )
 
-            # Wait for file processing state
             while uploaded_media.state.name == "PROCESSING":
                 time.sleep(2)
                 uploaded_media = client.files.get(name=uploaded_media.name)
@@ -236,7 +231,6 @@ def process_grading():
             if uploaded_media.state.name == "FAILED":
                 raise ValueError("PDF File processing failed on Gemini server.")
 
-            # Construct & sanitize context prompt
             prompt_content = f"""
             You are a highly thorough academic grader. Assess the student script provided.
             Reference Marking Rubric/Guide context: {sanitize_text(rubric_text)}
@@ -245,16 +239,21 @@ def process_grading():
             Carefully cross-verify every written answer against the criteria. Assign individual question points and generate layout mapping annotations for exact visual points on pages.
             """
 
-            # Call API with exponential retry logic
             response = call_gemini_with_retry(uploaded_media, prompt_content, retries=3)
-            grading_data = json.loads(response.text)
+            
+            # Clean possible Markdown JSON formatting
+            cleaned_text = response.text.strip()
+            if cleaned_text.startswith("```"):
+                cleaned_text = cleaned_text.strip("`").removeprefix("json").strip()
+            
+            grading_data = json.loads(cleaned_text)
 
         except Exception as e:
             logger.error(f"Unrecoverable error while processing script for student '{name}': {e}", exc_info=True)
             grading_data = {
                 "score": 0.0,
                 "breakdown": [],
-                "overall_feedback": f"Evaluation interrupted (Server Error 500/Timeout): {str(e)}",
+                "overall_feedback": f"Evaluation interrupted: {str(e)}",
                 "annotations": []
             }
 
@@ -263,9 +262,9 @@ def process_grading():
                 try:
                     client.files.delete(name=uploaded_media.name)
                 except Exception as del_err:
-                    logger.warning(f"Failed to delete uploaded media {uploaded_media.name}: {del_err}")
+                    logger.warning(f"Failed to delete uploaded media: {del_err}")
 
-        # 2. Document Layout Overlay Engine
+        # Document Layout Overlay Engine
         graded_filename = f"Graded_{unique_prefix}_{filename}"
         graded_pdf_path = os.path.join(OUTPUT_FOLDER, graded_filename)
         annotate_student_pdf(script_path, graded_pdf_path, grading_data)
@@ -288,7 +287,7 @@ def process_grading():
 
 
 def annotate_student_pdf(input_pdf_path, output_pdf_path, grading_data):
-    """Draws red circle grades and comment callouts natively onto student's work canvas dimensions."""
+    """Draws red score stamps and annotated callouts natively onto student's PDF pages."""
     try:
         reader = PdfReader(input_pdf_path)
         writer = PdfWriter()
@@ -308,6 +307,7 @@ def annotate_student_pdf(input_pdf_path, output_pdf_path, grading_data):
             packet = io.BytesIO()
             can = canvas.Canvas(packet, pagesize=(page_width, page_height))
 
+            # Page 1: Grade Badge Seal
             if page_idx == 0:
                 can.setFillColorRGB(0.85, 0.1, 0.1)
                 can.setStrokeColorRGB(0.85, 0.1, 0.1)
@@ -317,24 +317,24 @@ def annotate_student_pdf(input_pdf_path, output_pdf_path, grading_data):
                 score_val = grading_data.get('score', 0)
                 can.drawCentredString(page_width - 70, page_height - 76, f"{score_val}")
 
+            # Draw Page Annotations
             for ann in page_annotations:
                 x_val = ann.get('x_percent', 50) if isinstance(ann, dict) else getattr(ann, 'x_percent', 50)
                 y_val = ann.get('y_percent', 50) if isinstance(ann, dict) else getattr(ann, 'y_percent', 50)
                 comment_val = ann.get('comment', '') if isinstance(ann, dict) else getattr(ann, 'comment', '')
 
-                x_pct = float(x_val) / 100.0
-                y_pct = float(y_val) / 100.0
+                target_x = (float(x_val) / 100.0) * page_width
+                target_y = page_height - ((float(y_val) / 100.0) * page_height)
 
-                target_x = x_pct * page_width
-                target_y = page_height - (y_pct * page_height)
-
+                # Draw Point Marker
                 can.setFillColorRGB(0.85, 0.1, 0.1)
                 can.setStrokeColorRGB(0.85, 0.1, 0.1)
                 can.setLineWidth(1.5)
+                can.circle(target_x, target_y, 6, stroke=1, fill=1)
 
-                can.circle(target_x, target_y, 8, stroke=1, fill=0)
+                # Draw Comment Text
                 can.setFont("Helvetica-Bold", 9)
-                can.drawString(target_x + 12, target_y - 3, str(comment_val))
+                can.drawString(target_x + 10, target_y - 3, str(comment_val)[:60])
 
             can.save()
             packet.seek(0)
@@ -391,5 +391,5 @@ def export_xlsx():
 
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
+    port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
